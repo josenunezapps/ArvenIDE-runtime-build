@@ -14,12 +14,12 @@ echo "[Arven JDK] Work dir: $WORK_ROOT"
 rm -rf "$WORK_ROOT"
 mkdir -p "$WORK_ROOT" "$OUTPUT_DIR"
 
-echo "[1/6] Cloning Termux packages..."
+echo "[1/7] Cloning Termux packages..."
 git clone --depth 1 https://github.com/termux/termux-packages.git "$TERMUX_REPO"
 
 cd "$TERMUX_REPO"
 
-echo "[2/6] Configuring Termux build for Arven's private prefix..."
+echo "[2/7] Configuring Termux build for Arven's private prefix..."
 python3 - <<'PY'
 from pathlib import Path
 p = Path("scripts/properties.sh")
@@ -33,7 +33,7 @@ PY
 
 grep -n 'TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh | head -n 1
 
-echo "[3/6] Applying Termux CI workaround for AppArmor/fuse-overlayfs SDK bug..."
+echo "[3/7] Applying Termux CI workaround for AppArmor/fuse-overlayfs SDK bug..."
 python3 - <<'PY'
 from pathlib import Path
 
@@ -78,7 +78,23 @@ text = text[:idx] + '\nAPPARMOR_PARSER=""\n' + text[idx:]
 run_docker.write_text(text, encoding="utf-8")
 PY
 
-echo "[4/6] Building Android-10-compatible bootstrap + OpenJDK 17..."
+echo "[4/7] Fixing upstream bootstrap package name bug (bzip2 -> libbz2)..."
+python3 - <<'PY2'
+from pathlib import Path
+p = Path("scripts/build-bootstraps.sh")
+text = p.read_text(encoding="utf-8")
+old = 'PACKAGES+=("bzip2")'
+new = 'PACKAGES+=("libbz2")'
+if old in text:
+    text = text.replace(old, new, 1)
+elif new not in text:
+    raise SystemExit("Could not find expected bzip2/libbz2 bootstrap package entry")
+p.write_text(text, encoding="utf-8")
+PY2
+
+grep -n 'PACKAGES+=("libbz2")' scripts/build-bootstraps.sh
+
+echo "[5/7] Building Android-10-compatible bootstrap + OpenJDK 17..."
 ./scripts/run-docker.sh \
     ./scripts/build-bootstraps.sh \
     --android10 \
@@ -91,7 +107,7 @@ if [ ! -f "$BOOTSTRAP" ]; then
     exit 1
 fi
 
-echo "[5/6] Validating JDK/runtime contents..."
+echo "[6/7] Validating JDK/runtime contents..."
 python3 - "$BOOTSTRAP" <<'PY'
 import sys, zipfile
 
@@ -118,7 +134,7 @@ with zipfile.ZipFile(archive) as z:
 print("Runtime archive contains all required JDK 17 files.")
 PY
 
-echo "[6/6] Preparing Arven artifact..."
+echo "[7/7] Preparing Arven artifact..."
 FINAL="$OUTPUT_DIR/arven-jdk17-$ARCH.zip"
 cp "$BOOTSTRAP" "$FINAL"
 
