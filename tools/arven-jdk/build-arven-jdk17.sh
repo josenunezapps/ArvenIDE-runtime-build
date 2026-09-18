@@ -14,12 +14,12 @@ echo "[Arven JDK] Work dir: $WORK_ROOT"
 rm -rf "$WORK_ROOT"
 mkdir -p "$WORK_ROOT" "$OUTPUT_DIR"
 
-echo "[1/7] Cloning Termux packages..."
+echo "[1/8] Cloning Termux packages..."
 git clone --depth 1 https://github.com/termux/termux-packages.git "$TERMUX_REPO"
 
 cd "$TERMUX_REPO"
 
-echo "[2/7] Configuring Termux build for Arven's private prefix..."
+echo "[2/8] Configuring Termux build for Arven's private prefix..."
 python3 - <<'PY'
 from pathlib import Path
 p = Path("scripts/properties.sh")
@@ -33,7 +33,7 @@ PY
 
 grep -n 'TERMUX_APP__PACKAGE_NAME=' scripts/properties.sh | head -n 1
 
-echo "[3/7] Applying Termux CI workaround for AppArmor/fuse-overlayfs SDK bug..."
+echo "[3/8] Applying Termux CI workaround for AppArmor/fuse-overlayfs SDK bug..."
 python3 - <<'PY'
 from pathlib import Path
 
@@ -78,7 +78,7 @@ text = text[:idx] + '\nAPPARMOR_PARSER=""\n' + text[idx:]
 run_docker.write_text(text, encoding="utf-8")
 PY
 
-echo "[4/7] Fixing upstream bootstrap package name bug (bzip2 -> libbz2)..."
+echo "[4/8] Fixing upstream bootstrap package name bug (bzip2 -> libbz2)..."
 python3 - <<'PY2'
 from pathlib import Path
 p = Path("scripts/build-bootstraps.sh")
@@ -94,12 +94,42 @@ PY2
 
 grep -n 'PACKAGES+=("libbz2")' scripts/build-bootstraps.sh
 
-echo "[5/7] Building Android-10-compatible bootstrap + OpenJDK 17..."
+echo "[5/8] Ensuring PulseAudio has libsndfile available before OpenJDK 17..."
+python3 - <<'PY3'
+from pathlib import Path
+import re
+
+p = Path("packages/pulseaudio/build.sh")
+if not p.is_file():
+    raise SystemExit("Could not find packages/pulseaudio/build.sh")
+
+text = p.read_text(encoding="utf-8")
+m = re.search(r'^TERMUX_PKG_DEPENDS="([^"]*)"', text, flags=re.MULTILINE)
+if not m:
+    raise SystemExit("Could not find TERMUX_PKG_DEPENDS in packages/pulseaudio/build.sh")
+
+deps = [d.strip() for d in m.group(1).split(",") if d.strip()]
+if "libsndfile" not in deps:
+    deps.append("libsndfile")
+    replacement = 'TERMUX_PKG_DEPENDS="' + ', '.join(deps) + '"'
+    text = text[:m.start()] + replacement + text[m.end():]
+    p.write_text(text, encoding="utf-8")
+    print("Patched PulseAudio dependency list: added libsndfile")
+else:
+    print("PulseAudio already declares libsndfile")
+
+if not Path("packages/libsndfile/build.sh").is_file():
+    raise SystemExit("Could not find packages/libsndfile/build.sh")
+PY3
+
+grep -n 'TERMUX_PKG_DEPENDS=.*libsndfile' packages/pulseaudio/build.sh
+
+echo "[6/8] Building Android-10-compatible bootstrap + libsndfile + OpenJDK 17..."
 ./scripts/run-docker.sh \
     ./scripts/build-bootstraps.sh \
     --android10 \
     --architectures "$ARCH" \
-    --add openjdk-17
+    --add libsndfile,openjdk-17
 
 BOOTSTRAP="$TERMUX_REPO/bootstrap-$ARCH.zip"
 if [ ! -f "$BOOTSTRAP" ]; then
@@ -107,7 +137,7 @@ if [ ! -f "$BOOTSTRAP" ]; then
     exit 1
 fi
 
-echo "[6/7] Validating JDK/runtime contents..."
+echo "[7/8] Validating JDK/runtime contents..."
 python3 - "$BOOTSTRAP" <<'PY'
 import sys, zipfile
 
@@ -134,7 +164,7 @@ with zipfile.ZipFile(archive) as z:
 print("Runtime archive contains all required JDK 17 files.")
 PY
 
-echo "[7/7] Preparing Arven artifact..."
+echo "[8/8] Preparing Arven artifact..."
 FINAL="$OUTPUT_DIR/arven-jdk17-$ARCH.zip"
 cp "$BOOTSTRAP" "$FINAL"
 
@@ -151,7 +181,7 @@ architecture=$ARCH
 termux-packages-commit=$TERMUX_COMMIT
 built-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 source=https://github.com/termux/termux-packages
-workaround=termux-packages-29118-apparmor-fuse-overlayfs
+workaround=termux-packages-29118-apparmor-fuse-overlayfs;bootstrap-libbz2;pulseaudio-libsndfile-prebuild
 EOF2
 
 echo
