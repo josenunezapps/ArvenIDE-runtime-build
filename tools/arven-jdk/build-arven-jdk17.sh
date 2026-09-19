@@ -94,34 +94,58 @@ PY2
 
 grep -n 'PACKAGES+=("libbz2")' scripts/build-bootstraps.sh
 
-echo "[5/8] Ensuring PulseAudio has libsndfile available before OpenJDK 17..."
+echo "[5/8] Breaking the libsndfile/libmpg123/PulseAudio dependency cycle..."
 python3 - <<'PY3'
 from pathlib import Path
 import re
 
-p = Path("packages/pulseaudio/build.sh")
-if not p.is_file():
+snd = Path("packages/libsndfile/build.sh")
+pulse = Path("packages/pulseaudio/build.sh")
+if not snd.is_file():
+    raise SystemExit("Could not find packages/libsndfile/build.sh")
+if not pulse.is_file():
     raise SystemExit("Could not find packages/pulseaudio/build.sh")
 
-text = p.read_text(encoding="utf-8")
+# Current Termux graph contains a source-build cycle for a custom prefix:
+# libsndfile -> libmpg123 (build-dep: pulseaudio) -> pulseaudio -> libsndfile.
+# Arven/OpenJDK only needs a working libsndfile for PulseAudio; MPEG support in
+# libsndfile is not required. Build libsndfile without its MPEG codec deps.
+text = snd.read_text(encoding="utf-8")
 m = re.search(r'^TERMUX_PKG_DEPENDS="([^"]*)"', text, flags=re.MULTILINE)
 if not m:
-    raise SystemExit("Could not find TERMUX_PKG_DEPENDS in packages/pulseaudio/build.sh")
+    raise SystemExit("Could not find TERMUX_PKG_DEPENDS in packages/libsndfile/build.sh")
 
 deps = [d.strip() for d in m.group(1).split(",") if d.strip()]
-if "libsndfile" not in deps:
-    deps.append("libsndfile")
-    replacement = 'TERMUX_PKG_DEPENDS="' + ', '.join(deps) + '"'
-    text = text[:m.start()] + replacement + text[m.end():]
-    p.write_text(text, encoding="utf-8")
-    print("Patched PulseAudio dependency list: added libsndfile")
-else:
-    print("PulseAudio already declares libsndfile")
+for dep in ("libmp3lame", "libmpg123"):
+    deps = [d for d in deps if d != dep]
+replacement = 'TERMUX_PKG_DEPENDS="' + ', '.join(deps) + '"'
+text = text[:m.start()] + replacement + text[m.end():]
 
-if not Path("packages/libsndfile/build.sh").is_file():
-    raise SystemExit("Could not find packages/libsndfile/build.sh")
+cfg = re.search(r'(TERMUX_PKG_EXTRA_CONFIGURE_ARGS="\n)(.*?)(\n")', text, flags=re.DOTALL)
+if not cfg:
+    raise SystemExit("Could not find TERMUX_PKG_EXTRA_CONFIGURE_ARGS in packages/libsndfile/build.sh")
+body = cfg.group(2)
+if "--disable-mpeg" not in body.splitlines():
+    body = body.rstrip() + "\n--disable-mpeg"
+text = text[:cfg.start()] + cfg.group(1) + body + cfg.group(3) + text[cfg.end():]
+snd.write_text(text, encoding="utf-8")
+
+# PulseAudio must still depend on libsndfile; this is the dependency we are
+# satisfying with the reduced, non-MPEG libsndfile build above.
+ptext = pulse.read_text(encoding="utf-8")
+pm = re.search(r'^TERMUX_PKG_DEPENDS="([^"]*)"', ptext, flags=re.MULTILINE)
+if not pm:
+    raise SystemExit("Could not find TERMUX_PKG_DEPENDS in packages/pulseaudio/build.sh")
+pdeps = [d.strip() for d in pm.group(1).split(",") if d.strip()]
+if "libsndfile" not in pdeps:
+    raise SystemExit("PulseAudio no longer declares libsndfile; upstream layout changed")
+
+print("libsndfile MPEG dependencies removed; --disable-mpeg enabled")
+print("PulseAudio still depends on libsndfile")
 PY3
 
+grep -n 'TERMUX_PKG_DEPENDS=' packages/libsndfile/build.sh | head -n 1
+grep -n -- '--disable-mpeg' packages/libsndfile/build.sh
 grep -n 'TERMUX_PKG_DEPENDS=.*libsndfile' packages/pulseaudio/build.sh
 
 echo "[6/8] Building Android-10-compatible bootstrap + libsndfile + OpenJDK 17..."
@@ -181,7 +205,7 @@ architecture=$ARCH
 termux-packages-commit=$TERMUX_COMMIT
 built-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 source=https://github.com/termux/termux-packages
-workaround=termux-packages-29118-apparmor-fuse-overlayfs;bootstrap-libbz2;pulseaudio-libsndfile-prebuild
+workaround=termux-packages-29118-apparmor-fuse-overlayfs;bootstrap-libbz2;libsndfile-disable-mpeg-cycle-break
 EOF2
 
 echo
