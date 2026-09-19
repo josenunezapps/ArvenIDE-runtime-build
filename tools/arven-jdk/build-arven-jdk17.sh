@@ -68,8 +68,6 @@ needle = '''if [ -z "$APPARMOR_PARSER" ] || ! $SUDO aa-status --enabled; then'''
 pos = text.find(needle)
 if pos == -1:
     raise SystemExit("Could not find AppArmor detection block in scripts/run-docker.sh")
-# Disable AppArmor profile loading after its detection block, matching the
-# upstream workaround. Insert before load_apparmor_profile().
 load_fn = '\nload_apparmor_profile() {'
 idx = text.find(load_fn, pos)
 if idx == -1:
@@ -106,10 +104,6 @@ if not snd.is_file():
 if not pulse.is_file():
     raise SystemExit("Could not find packages/pulseaudio/build.sh")
 
-# Current Termux graph contains a source-build cycle for a custom prefix:
-# libsndfile -> libmpg123 (build-dep: pulseaudio) -> pulseaudio -> libsndfile.
-# Arven/OpenJDK only needs a working libsndfile for PulseAudio; MPEG support in
-# libsndfile is not required. Build libsndfile without its MPEG codec deps.
 text = snd.read_text(encoding="utf-8")
 m = re.search(r'^TERMUX_PKG_DEPENDS="([^"]*)"', text, flags=re.MULTILINE)
 if not m:
@@ -130,8 +124,6 @@ if "--disable-mpeg" not in body.splitlines():
 text = text[:cfg.start()] + cfg.group(1) + body + cfg.group(3) + text[cfg.end():]
 snd.write_text(text, encoding="utf-8")
 
-# PulseAudio must still depend on libsndfile; this is the dependency we are
-# satisfying with the reduced, non-MPEG libsndfile build above.
 ptext = pulse.read_text(encoding="utf-8")
 pm = re.search(r'^TERMUX_PKG_DEPENDS="([^"]*)"', ptext, flags=re.MULTILINE)
 if not pm:
@@ -172,8 +164,14 @@ required = [
     "lib/jvm/java-17-openjdk/lib/modules",
     "lib/jvm/java-17-openjdk/lib/libjava.so",
     "lib/jvm/java-17-openjdk/lib/server/libjvm.so",
-    "lib/libtermux-exec.so",
     "SYMLINKS.txt",
+]
+
+termux_exec_candidates = [
+    "lib/libtermux-exec-ld-preload.so",
+    "lib/libtermux-exec-direct-ld-preload.so",
+    "lib/libtermux-exec-linker-ld-preload.so",
+    "lib/libtermux-exec.so",
 ]
 
 with zipfile.ZipFile(archive) as z:
@@ -185,7 +183,16 @@ with zipfile.ZipFile(archive) as z:
             print(" -", item, file=sys.stderr)
         raise SystemExit(2)
 
+    exec_found = [p for p in termux_exec_candidates if p in names]
+    if not exec_found:
+        print("Missing a usable termux-exec preload library.", file=sys.stderr)
+        print("Checked:", file=sys.stderr)
+        for item in termux_exec_candidates:
+            print(" -", item, file=sys.stderr)
+        raise SystemExit(2)
+
 print("Runtime archive contains all required JDK 17 files.")
+print("termux-exec preload library:", exec_found[0])
 PY
 
 echo "[8/8] Preparing Arven artifact..."
@@ -205,7 +212,7 @@ architecture=$ARCH
 termux-packages-commit=$TERMUX_COMMIT
 built-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 source=https://github.com/termux/termux-packages
-workaround=termux-packages-29118-apparmor-fuse-overlayfs;bootstrap-libbz2;libsndfile-disable-mpeg-cycle-break
+workaround=termux-packages-29118-apparmor-fuse-overlayfs;bootstrap-libbz2;libsndfile-disable-mpeg-cycle-break;termux-exec-current-layout
 EOF2
 
 echo
