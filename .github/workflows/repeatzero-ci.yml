@@ -49,7 +49,18 @@ jobs:
       - name: Reconstruct exact RepeatZero ZIP
         run: |
           set -euo pipefail
-          cat repeatzero/chunk_0*.b64 > /tmp/repeatzero.b64
+          cat \
+            repeatzero/chunk_00.b64 \
+            repeatzero/chunk_01.b64 \
+            repeatzero/chunk_02.b64 \
+            repeatzero/chunk_03.b64 \
+            repeatzero/chunk_04.b64 \
+            repeatzero/chunk_05_0.b64 \
+            repeatzero/chunk_05_1.b64 \
+            repeatzero/chunk_05_2.b64 \
+            repeatzero/chunk_05_3.b64 \
+            repeatzero/chunk_05_4.b64 \
+            repeatzero/chunk_06.b64 > /tmp/repeatzero.b64
           echo "245f7805b17bf193966c324cfd50da84868ec9383be72800a21cf958c4cb6988  /tmp/repeatzero.b64" | sha256sum -c -
           base64 -d /tmp/repeatzero.b64 > /tmp/repeatzero.zip
           echo "2d7b93d4f7cec0633bee2ede344e97c476f34eecba4b22f3066dc1a9badba137  /tmp/repeatzero.zip" | sha256sum -c -
