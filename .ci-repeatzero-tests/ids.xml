@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="counter" type="id" />
+    <item name="btn_a" type="id" />
+    <item name="btn_b" type="id" />
+    <item name="payment_button" type="id" />
+    <item name="btn_c" type="id" />
+    <item name="password_field" type="id" />
+    <item name="toggle_b" type="id" />
+    <item name="reset_count" type="id" />
+</resources>
