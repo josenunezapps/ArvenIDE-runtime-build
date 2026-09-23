@@ -116,14 +116,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            cd /tmp/repeatzero-src/ZenixRepeatZero
-            mkdir -p app/build/reports/androidTests
-            set +e
-            gradle connectedDebugAndroidTest --stacktrace --no-daemon
-            RESULT=$?
-            adb logcat -d > app/build/reports/androidTests/emulator-logcat.txt 2>&1 || true
-            adb shell dumpsys accessibility > app/build/reports/androidTests/accessibility-dumpsys.txt 2>&1 || true
-            exit $RESULT
+            mkdir -p /tmp/repeatzero-src/ZenixRepeatZero/app/build/reports/androidTests
+            gradle -p /tmp/repeatzero-src/ZenixRepeatZero connectedDebugAndroidTest --stacktrace --no-daemon || RESULT=$?
+            adb logcat -d > /tmp/repeatzero-src/ZenixRepeatZero/app/build/reports/androidTests/emulator-logcat.txt 2>&1 || true
+            adb shell dumpsys accessibility > /tmp/repeatzero-src/ZenixRepeatZero/app/build/reports/androidTests/accessibility-dumpsys.txt 2>&1 || true
+            exit ${RESULT:-0}
 
       - name: Upload functional reports
         if: always()
