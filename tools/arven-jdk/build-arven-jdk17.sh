@@ -37,22 +37,33 @@ echo "[3/8] Applying Termux CI workaround for AppArmor/fuse-overlayfs SDK bug...
 python3 - <<'PY'
 from pathlib import Path
 
-# Work around current termux-packages CI/container bug where the Android SDK
-# inside the builder becomes effectively non-writable / malformed while using
-# fuse-overlayfs + AppArmor. This mirrors the minimal successful workaround
-# documented in upstream issue termux/termux-packages#29118.
+# Work around the termux-packages CI/container issue where the Android SDK
+# inside the builder can become effectively non-writable / malformed while
+# using fuse-overlayfs + AppArmor. Upstream periodically renames the active
+# toolchain setup script (29 -> 30, etc.), so discover it by content rather
+# than hard-coding a versioned file name.
 
-toolchain = Path("scripts/build/toolchain/termux_setup_toolchain_29.sh")
-text = toolchain.read_text(encoding="utf-8")
+toolchain_dir = Path("scripts/build/toolchain")
 old_mount = 'if ! mountpoint -q "${TERMUX_STANDALONE_TOOLCHAIN}"; then'
-if old_mount not in text:
-    raise SystemExit("Could not find fuse-overlayfs mount block in termux_setup_toolchain_29.sh")
-text = text.replace(old_mount, 'if false; then', 1)
-
 needle = '''\t\treturn\n\tfi\n\n\tlocal _NDK_ARCHNAME=$TERMUX_ARCH'''
 replacement = '''\t\treturn\n\tfi\n\n\trm -rf "${TERMUX_STANDALONE_TOOLCHAIN}"\n\tcp "$NDK/toolchains/llvm/prebuilt/linux-x86_64" "${TERMUX_STANDALONE_TOOLCHAIN}" -r\n\tcp "$NDK/source.properties" "${TERMUX_STANDALONE_TOOLCHAIN}"\n\n\tlocal _NDK_ARCHNAME=$TERMUX_ARCH'''
-if needle not in text:
-    raise SystemExit("Could not find toolchain insertion point")
+
+toolchain = None
+text = None
+for candidate in sorted(toolchain_dir.glob("termux_setup_toolchain_*.sh"), reverse=True):
+    if candidate.name.endswith("_gnu.sh"):
+        continue
+    candidate_text = candidate.read_text(encoding="utf-8")
+    if old_mount in candidate_text and needle in candidate_text:
+        toolchain = candidate
+        text = candidate_text
+        break
+
+if toolchain is None or text is None:
+    raise SystemExit("Could not find the active fuse-overlayfs toolchain setup script")
+
+print(f"Patching toolchain setup: {toolchain}")
+text = text.replace(old_mount, 'if false; then', 1)
 text = text.replace(needle, replacement, 1)
 toolchain.write_text(text, encoding="utf-8")
 
