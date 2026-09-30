@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .github/workflows/build-arven-jdk17.yml
+      - tools/arven-jdk/**
 
 permissions:
   contents: write
