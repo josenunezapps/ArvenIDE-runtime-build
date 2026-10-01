@@ -31,17 +31,53 @@ jobs:
           df -h
 
       - name: Build Arven-specific JDK 17 runtime
+        id: build
+        shell: bash
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/.arven-diagnostics"
           chmod +x tools/arven-jdk/build-arven-jdk17.sh
-          tools/arven-jdk/build-arven-jdk17.sh aarch64 "$GITHUB_WORKSPACE/.arven-jdk-build"
+          set +e
+          set -o pipefail
+          tools/arven-jdk/build-arven-jdk17.sh aarch64 "$GITHUB_WORKSPACE/.arven-jdk-build" 2>&1 | tee "$GITHUB_WORKSPACE/.arven-diagnostics/build.log"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$STATUS" >> "$GITHUB_OUTPUT"
+          tail -n 500 "$GITHUB_WORKSPACE/.arven-diagnostics/build.log" > "$GITHUB_WORKSPACE/.arven-diagnostics/build-tail.log" || true
+          echo "Build exit code: $STATUS"
+
+      - name: Show build failure tail
+        if: always() && steps.build.outputs.exit_code != '0'
+        run: |
+          echo "========== LAST 500 BUILD LINES =========="
+          cat .arven-diagnostics/build-tail.log || true
+          echo "=========================================="
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arven-jdk17-build-diagnostics
+          path: |
+            .arven-diagnostics/build.log
+            .arven-diagnostics/build-tail.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop after failed runtime build
+        if: steps.build.outputs.exit_code != '0'
+        run: |
+          echo "Arven JDK runtime build failed with exit code ${{ steps.build.outputs.exit_code }}" >&2
+          exit 1
 
       - name: Show artifact info
+        if: steps.build.outputs.exit_code == '0'
         run: |
           ls -lh .arven-jdk-build/output/
           cat .arven-jdk-build/output/build-info.txt
           cat .arven-jdk-build/output/arven-jdk17-aarch64.zip.sha256
 
       - name: Upload Arven JDK 17
+        if: steps.build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
           name: arven-jdk17-aarch64
@@ -53,6 +89,7 @@ jobs:
           retention-days: 14
 
       - name: Publish permanent GitHub Release
+        if: steps.build.outputs.exit_code == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
